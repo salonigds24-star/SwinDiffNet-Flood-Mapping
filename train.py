@@ -9,7 +9,7 @@ import torch
 
 
 # Main folder path
-MAIN_DIR = "/content/drive/MyDrive/Punjab_Patches_2025"   # change this
+MAIN_DIR = "/content/drive/MyDrive/Assam_Flood_2022"   # change this
 
 # All subfolders
 SUBFOLDERS = ["ndwi", "vh", "gt"]
@@ -65,8 +65,8 @@ else:
 # ======================================================
 # PATHS
 # ======================================================
-RAW_DIR = ""
-OUT_DIR = ""
+RAW_DIR = "/content/drive/MyDrive/Assam_Flood_2022"
+OUT_DIR = "/content/drive/MyDrive/Assam_DATA_PROCESSED50"
 
 folders = ["vh", "ndwi", "gt"]
 
@@ -168,8 +168,8 @@ else:
 # Comparision Raw vs Processed
 
 # Paths
-RAW_DIR = ""
-PROC_DIR = ""
+RAW_DIR = "/content/drive/MyDrive/Assam_Flood_2022"
+PROC_DIR = "/content/drive/MyDrive/Assam_DATA_PROCESSED50"
 
 folders = ["vh", "ndwi", "gt"]
 
@@ -220,9 +220,9 @@ for folder in folders:
 
 #Data Split-train, test, validation
 
-SOURCE_FOR_SPLIT_DIR = "" # <<< FIXED THIS
+SOURCE_FOR_SPLIT_DIR = "/content/drive/MyDrive/Assam_DATA_PROCESSED50" # <<< FIXED THIS
 
-OUT_DIR = "" # Output of the split operation
+OUT_DIR = "/content/drive/MyDrive/Assam_DATA/SPLIT50" # Output of the split operation
 
 folders = ["vh", "ndwi", "gt"]
 
@@ -312,8 +312,8 @@ else:
 
 #Data Augmentatiom
 
-TRAIN_DIR = ""
-OUT_DIR = ""
+TRAIN_DIR = "/content/drive/MyDrive/Assam_DATA/SPLIT50/train"
+OUT_DIR = "/content/drive/MyDrive/Assam_DATA_Augument50"
 
 folders = ["vh", "ndwi", "gt"]
 
@@ -396,15 +396,15 @@ if not SKIP_AUG:
 else:
     print("⏩ Using existing augmented dataset (no duplicates added).")
 
-#Nan-free Patches only
+#Nan-free Patches only--This is for training(Augmented data) set same we can do for test set also by changing the paths
 
-in_sar  = ""
-in_ndwi = ""
-in_gt   = ""
+in_sar  = "/content/drive/MyDrive/Assam_DATA_Augument50/vh"
+in_ndwi = "/content/drive/MyDrive/Assam_DATA_Augument50/ndwi"
+in_gt   = "/content/drive/MyDrive/Assam_DATA_Augument50/gt"
 
-out_sar  = ""
-out_ndwi = ""
-out_gt   = ""
+out_sar  = "/content/drive/MyDrive/Assam_nan-free/vh"
+out_ndwi = "/content/drive/MyDrive/Assam_nan-free/ndwi"
+out_gt   = "/content/drive/MyDrive/Assam_nan-free/gt"
 
 os.makedirs(out_sar, exist_ok=True)
 os.makedirs(out_ndwi, exist_ok=True)
@@ -494,7 +494,7 @@ from glob import glob
 import cv2 # Import OpenCV for resizing
 
 # Define the root directory for the augmented data
-TRAIN_DATA_ROOT = ""
+TRAIN_DATA_ROOT = "/content/drive/MyDrive/Assam_nan-free"
 
 # Define target patch size
 TARGET_SIZE = (50, 50)
@@ -733,8 +733,8 @@ import torch
 from tqdm import tqdm
 
 # --- User-defined paths ---
-INPUT_SAR_DIR = ""  # <--- SET YOUR INPUT SAR DIRECTORY HERE
-OUTPUT_NDWI_DIR = "" # <--- SET YOUR OUTPUT NDWI DIRECTORY HERE
+INPUT_SAR_DIR = "/content/drive/MyDrive/Assam_nan-free/vh"  # <--- SET YOUR INPUT SAR DIRECTORY HERE
+OUTPUT_NDWI_DIR = "/content/drive/MyDrive/Asssam_gen_ndwi_tif" # <--- SET YOUR OUTPUT NDWI DIRECTORY HERE
 
 # Ensure output directory exists
 os.makedirs(OUTPUT_NDWI_DIR, exist_ok=True)
