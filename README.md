@@ -66,7 +66,7 @@ framework achieves an overall flood segmentation accuracy of approximately 83% o
 the combined dataset, indicating that diffusion-enhanced feature generation improves
 segmentation reliability and flood boundary detection.
 
-provide a detailed comparison of segmentation performance across mul-
+A detailed comparison of segmentation performance across mul-
 tiple regions, namely Punjab, Bihar, West Bengal, Assam, and Uttar Pradesh. The
 proposed SwinDiffNet framework is evaluated against baseline models including 1D-
 CNN, 2D-CNN, Conditional-GAN, and Swin-UNet. Across all regions, SwinDiffNet
@@ -88,3 +88,35 @@ reflecting better agreement beyond random classification. The IoU values, rangin
 the proposed model. The limited inter-country performance variation highlights the
 model’s ability to learn domain-invariant flood representations, thereby improving its
 applicability for large-scale and real-world flood monitoring scenarios.
+
+4. Implementations detail
+4.A Hyperparameter configuration employed for
+training the Conditional Diffusion Model (CDM) in the
+proposed framework.
+Parameter Value
+Patch size 50 × 50
+Batch size 8
+Training epochs 150
+Diffusion steps (T ) 200
+Noise schedule Linear
+βmin 1 × 10−4
+βmax 0.02
+Optimizer Adam
+Learning rate 1 × 10−4
+Loss function Mean Squared Error (MSE)
+
+4.B Hyperparameter settings used for training the
+Swin-UNet-based flood segmentation model.
+Parameter Value
+Input patch size 50 × 50
+Input channels 3 (SAR, NDWI, reconstructed NDWI)
+Batch size 4
+Training epochs 40
+Optimizer Adam
+Learning rate 1 × 10−4
+Loss function BCE + Dice Loss
+
+
+5. Dataset Access / Instructions
+  5.1 
+
