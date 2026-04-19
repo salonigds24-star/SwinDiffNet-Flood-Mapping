@@ -829,14 +829,14 @@ else:
 
 #swin-Unet for flood segmentation 
 
-# ==========================================
-# INSTALL (Run once)
-# ==========================================
+# ===============================
+# INSTALL (run once in Colab)
+# ===============================
 !pip install timm einops
 
-# ==========================================
+# ===============================
 # IMPORTS
-# ==========================================
+# ===============================
 import os
 import numpy as np
 import torch
@@ -845,60 +845,85 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import timm
+import rasterio # Added import for rasterio
+import re # Import regular expression module for robust filename parsing
 
-# ==========================================
-# CONFIG
-# ==========================================
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH_SIZE = 8
-EPOCHS = 40
+# Helper function to read .tif files
+def read_tif(path):
+    with rasterio.open(path) as src:
+        data = src.read(1).astype(np.float32)
+        # Handle potential NaN values, e.g., convert to 0 or a sensible value
+        data = np.nan_to_num(data, nan=0.0) # Replace NaN with 0
+        return data
 
-# ==========================================
-# DATASET (50 → 56 PAD ONLY)
-# ==========================================
+
+# ===============================
+# DATASET (50x50 → 64x64)
+# ===============================
 class FloodDataset(Dataset):
-    def __init__(self, sar_dir, ndwi_dir, gen_ndwi_dir, mask_dir):
+    def __init__(self, sar_dir, ndwi_dir, gen_ndwi_dir, mask_dir, dataset_type='train'):
         self.sar_dir = sar_dir
         self.ndwi_dir = ndwi_dir
         self.gen_ndwi_dir = gen_ndwi_dir
         self.mask_dir = mask_dir
-        self.files = sorted([f for f in os.listdir(sar_dir) if f.endswith(".npy")])
+        self.dataset_type = dataset_type
+
+        # Filter for .tif files, as processed data is in .tif format
+        self.files = sorted([f for f in os.listdir(sar_dir) if f.endswith(".tif")])
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, idx):
-        # All files (SAR, NDWI, Generated NDWI, GT) for a given index share the same base filename.
-        # This was established by the previous augmentation and NPY conversion steps.
-        fname = self.files[idx]
+        sar_fname = self.files[idx] # e.g., sample_X_hflip.tif or S1_VH_patch_10.tif
 
-        sar = np.load(os.path.join(self.sar_dir, fname)).astype(np.float32)
-        ndwi = np.load(os.path.join(self.ndwi_dir, fname)).astype(np.float32)
-        gen_ndwi = np.load(os.path.join(self.gen_ndwi_dir, fname)).astype(np.float32)
-        mask = np.load(os.path.join(self.mask_dir, fname)).astype(np.float32)
+        # Determine naming conventions based on dataset_type
+        if self.dataset_type == 'train':
+            ndwi_fname = sar_fname
+            gt_fname = sar_fname
+            gen_ndwi_fname = sar_fname.replace(".tif", "_gen_ndwi.tif")
+        elif self.dataset_type == 'test':
+            # Extract patch number from SAR filename (e.g., '10' from 'S1_VH_patch_10.tif')
+            match = re.search(r'_patch_(\d+)\.tif$', sar_fname)
+            if not match:
+                raise ValueError(f"Could not parse patch number from filename: {sar_fname}")
+            patch_number = match.group(1)
+
+            ndwi_fname = f"NDWI_patch_{patch_number}.tif"
+            gt_fname = f"GT_patch_{patch_number}.tif"
+            gen_ndwi_fname = sar_fname.replace(".tif", "_test_gen_ndwi.tif")
+        else:
+            raise ValueError("Invalid dataset_type. Must be 'train' or 'test'.")
+
+        sar = read_tif(os.path.join(self.sar_dir, sar_fname))
+        ndwi = read_tif(os.path.join(self.ndwi_dir, ndwi_fname))
+        gen_ndwi = read_tif(os.path.join(self.gen_ndwi_dir, gen_ndwi_fname))
+        mask = read_tif(os.path.join(self.mask_dir, gt_fname))
 
         sar = sar.squeeze()
         ndwi = ndwi.squeeze()
         gen_ndwi = gen_ndwi.squeeze()
         mask = mask.squeeze()
 
-        # Normalize SAR
-        sar_std = sar.std()
-        sar = (sar - sar.mean()) / (sar_std + 1e-6) if sar_std > 1e-6 else np.zeros_like(sar)
+        # Normalize (only for non-mask data, mask should be 0/1)
+        sar = (sar - sar.mean()) / (sar.std() + 1e-6)
+        # NDWI and Gen_NDWI are already normalized by previous steps to [-1, 1] or [0, 1]
+        # If they are [0,1], clip to [-1,1] before stack if model expects this range.
+        # Let's assume they are already normalized to [-1,1] or compatible for model.
 
         x = np.stack([sar, ndwi, gen_ndwi], axis=0)
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
 
-        # •̣̣ RESIZE x to 224x224 for Swin-UNet encoder input
+        # 🔥 Resize 50x50 → 224x224 for Swin-UNet encoder input
         x = F.interpolate(x.unsqueeze(0), size=(224,224), mode="bilinear", align_corners=False).squeeze(0)
-        # Keep y (mask) at 50x50 to match model output
+        y = F.interpolate(y.unsqueeze(0), size=(224,224), mode="nearest").squeeze(0) # Mask resize with nearest
 
         return x, y
 
-# ==========================================
-# SWIN-UNET (56 INPUT)
-# ==========================================
+# ===============================
+# SWIN-UNET MODEL
+# ===============================
 class SwinUNet(nn.Module):
     def __init__(self, in_channels=3):
         super().__init__()
@@ -910,109 +935,123 @@ class SwinUNet(nn.Module):
             features_only=True
         )
 
-        enc_channels = self.encoder.feature_info.channels()
+        enc_channels = self.encoder.feature_info.channels()  # [96,192,384,768]
 
-        class UpBlock(nn.Module):
+        # Custom up_block that performs ConvTranspose2d, concatenates, and then applies Conv2d block
+        class CustomUpBlock(nn.Module):
             def __init__(self, in_c, skip_c, out_c):
                 super().__init__()
-                self.up = nn.ConvTranspose2d(in_c, skip_c, 2, stride=2)
-                self.conv = nn.Sequential(
-                    nn.Conv2d(skip_c + skip_c, out_c, 3, padding=1),
+                self.upsample = nn.ConvTranspose2d(in_c, skip_c, kernel_size=2, stride=2)
+                self.conv_block = nn.Sequential(
+                    nn.Conv2d(skip_c + skip_c, out_c, kernel_size=3, padding=1),
                     nn.ReLU(inplace=True),
-                    nn.Conv2d(out_c, out_c, 3, padding=1),
-                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_c, out_c, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True)
                 )
 
-            def forward(self, x, skip):
-                x = self.up(x)
-                if x.shape[-2:] != skip.shape[-2:]:
-                    x = F.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
-                x = torch.cat([x, skip], dim=1)
-                return self.conv(x)
+            def forward(self, x, skip_feature):
+                x = self.upsample(x)
+                # Ensure size match for concatenation (can happen if encoder output is not perfectly 2x)
+                if x.shape[-2:] != skip_feature.shape[-2:]:
+                    x = F.interpolate(x, size=skip_feature.shape[-2:], mode='bilinear', align_corners=False)
+                x = torch.cat([x, skip_feature], dim=1)
+                return self.conv_block(x)
 
-        self.up4 = UpBlock(enc_channels[3], enc_channels[2], enc_channels[2])
-        self.up3 = UpBlock(enc_channels[2], enc_channels[1], enc_channels[1])
-        self.up2 = UpBlock(enc_channels[1], enc_channels[0], enc_channels[0])
+        # Decoder blocks
+        self.up4 = CustomUpBlock(enc_channels[3], enc_channels[2], enc_channels[2]) # From e4 to e3 resolution
+        self.up3 = CustomUpBlock(enc_channels[2], enc_channels[1], enc_channels[1]) # From d4 to e2 resolution
+        self.up2 = CustomUpBlock(enc_channels[1], enc_channels[0], enc_channels[0]) # From d3 to e1 resolution
 
-        self.final = nn.Sequential(
-            nn.ConvTranspose2d(enc_channels[0], 64, 2, stride=2),
+        # Final upsampling block to original (224x224) input resolution. No skip from encoder here.
+        # This block will just upsample and do convolutions without concatenation.
+        self.final_upsample = nn.Sequential(
+            nn.ConvTranspose2d(enc_channels[0], 64, kernel_size=2, stride=2), # From 56x56 to 112x112
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(64, 64, 2, stride=2),
+            nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2), # From 112x112 to 224x224
             nn.ReLU(inplace=True),
-            nn.Conv2d(64, 1, 1)
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
         )
+        self.out = nn.Conv2d(64, 1, 1)
 
     def forward(self, x):
+        original_input_size = x.shape[-2:] # Store original 50x50 size
+
+        # Encoder
+        # Input x is already 224x224 from dataset
         feats = self.encoder(x)
+        # Ensure features are in NCHW format by permuting from NHWC if necessary
+        e1, e2, e3, e4 = [f.permute(0, 3, 1, 2) if f.ndim == 4 and f.shape[-1] == c else f
+                          for f, c in zip(feats, self.encoder.feature_info.channels())]
 
-        # Convert NHWC → NCHW
-        e1, e2, e3, e4 = [f.permute(0,3,1,2) for f in feats]
+        # Decoder path
+        d4 = self.up4(e4, e3) # (B, 384, 14, 14)
+        d3 = self.up3(d4, e2) # (B, 192, 28, 28)
+        d2 = self.up2(d3, e1) # (B, 96, 56, 56)
 
-        d4 = self.up4(e4, e3)
-        d3 = self.up3(d4, e2)
-        d2 = self.up2(d3, e1)
+        # Final upsampling to 224x224
+        final_features = self.final_upsample(d2) # (B, 64, 224, 224)
 
-        out = torch.sigmoid(self.final(d2))
+        output = torch.sigmoid(self.out(final_features)) # (B, 1, 224, 224)
 
-        # •̣̣ Crop 56 → 50 (This cropping is correct as Swin-UNet operates on 224x224 internal feature maps)
-        # However, the output needs to be 50x50 to match the target `y` which is now 50x50.
-        # The `F.interpolate` from the other version of SwinUNet was better for aligning output to original size.
-        # Let's revert the output handling to interpolate back to 50x50 from current `final` output which is 224x224.
-        return F.interpolate(out, size=(50, 50), mode="bilinear", align_corners=False)
+        # Resize output back to original 50x50 size
+        return F.interpolate(output, size=original_input_size, mode='bilinear', align_corners=False)
 
-# ==========================================
-# LOSS
-# ==========================================
+# ===============================
+# LOSS (BCE + DICE)
+# ===============================
 class DiceLoss(nn.Module):
     def forward(self, p, t):
         smooth = 1e-6
         p = p.view(-1)
         t = t.view(-1)
         intersection = (p * t).sum()
-        return 1 - (2*intersection + smooth) / (p.sum() + t.sum() + smooth)
+        return 1 - (2*(intersection)+smooth)/(p.sum()+t.sum()+smooth)
 
+# Define a combined loss function - FIX for TypeError
 class CombinedLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, bce_weight=0.5, dice_weight=0.5):
         super().__init__()
-        self.bce = nn.BCELoss()
-        self.dice = DiceLoss()
+        self.bce_loss = nn.BCELoss()
+        self.dice_loss = DiceLoss()
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
 
-    def forward(self, p, t):
-        return 0.5*self.bce(p,t) + 0.5*self.dice(p,t)
+    def forward(self, pred, target):
+        bce = self.bce_loss(pred, target)
+        dice = self.dice_loss(pred, target)
+        return self.bce_weight * bce + self.dice_weight * dice
 
 criterion = CombinedLoss()
 
-# ==========================================
-# DATA
-# ==========================================
+# ===============================
+# TRAINING
+# ===============================
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+
 train_dataset = FloodDataset(
-    sar_dir="",
-    ndwi_dir="",
-    gen_ndwi_dir="",
-    mask_dir=""
+    sar_dir="/content/drive/MyDrive/Assam_nan-free/vh",
+    ndwi_dir="/content/drive/MyDrive/Assam_nan-free/ndwi",
+    gen_ndwi_dir="/content/drive/MyDrive/Assam_gen_ndwi_tif",
+    mask_dir="/content/drive/MyDrive/Assam_nan-free/gt"
 )
 
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
 
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    num_workers=2,
-    pin_memory=True
-)
+model = SwinUNet(in_channels=3).to(device)
 
-# ==========================================
-# TRAIN
-# ==========================================
-model = SwinUNet().to(DEVICE)
-optimizer = optim.AdamW(model.parameters(), lr=1e-4)
+optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-for epoch in range(EPOCHS):
+epochs = 40
+
+for epoch in range(epochs):
     model.train()
     epoch_loss = 0
 
     for x, y in train_loader:
-        x, y = x.to(DEVICE), y.to(DEVICE)
+        x, y = x.to(device), y.to(device)
 
         optimizer.zero_grad()
         preds = model(x)
@@ -1022,14 +1061,14 @@ for epoch in range(EPOCHS):
 
         epoch_loss += loss.item()
 
-    print(f"Epoch [{epoch+1}/{EPOCHS}] | Loss: {epoch_loss/len(train_loader):.4f}")
+    print(f"Epoch [{epoch+1}/{epochs}] | Loss: {epoch_loss/len(train_loader):.4f}")
 
-torch.save(model.state_dict(), "swin_unet_56.pth")
-print("✅ Training Complete (56x56 version)")
+torch.save(model.state_dict(), "swin_unet_flood_50x50.pth")
+print("✅ Swin-UNet training complete & model saved")
 
-# ===============================
-# IMPORTS
-# ===============================
+
+#Evaluation of train and testing set
+
 import torch
 import numpy as np
 import torch.nn as nn
@@ -1138,63 +1177,94 @@ class FloodDataset(Dataset):
         return x, y
 
 
+# ===============================
+# EVALUATION FUNCTION
+# ===============================
+def evaluate_model(model, dataloader, device, threshold=0.45):
+    model.eval()
+    criterion = nn.BCELoss()
 
-# ==========================================
-# LOAD MODEL
-# ==========================================
-model = SwinUNet().to(DEVICE)
-model.load_state_dict(torch.load("swin_unet_56.pth", map_location=DEVICE))
-model.eval()
+    all_preds = []
+    all_labels = []
+    total_loss = 0
 
+    with torch.no_grad():
+        for x, y in dataloader:
+            x = x.to(device)
+            y = y.to(device)
 
-# ==========================================
-# Train DATA PATHS
-# ==========================================
+            preds = model(x)
+            loss = criterion(preds, y)
+            total_loss += loss.item()
+
+            preds_bin = (preds > threshold).float()
+
+            all_preds.append(preds_bin.cpu().numpy().ravel())
+            all_labels.append(y.cpu().numpy().ravel())
+
+    all_preds = np.concatenate(all_preds)
+    all_labels = np.concatenate(all_labels)
+
+    metrics = {
+        "Accuracy": accuracy_score(all_labels, all_preds),
+        "Balanced Accuracy": balanced_accuracy_score(all_labels, all_preds),
+        "Precision": precision_score(all_labels, all_preds, zero_division=0),
+        "Recall": recall_score(all_labels, all_preds, zero_division=0),
+        "F1-score": f1_score(all_labels, all_preds, zero_division=0),
+        "IoU": jaccard_score(all_labels, all_preds, zero_division=0),
+        "Cohen Kappa": cohen_kappa_score(all_labels, all_preds),
+        "Loss": total_loss / len(dataloader)
+    }
+
+    return metrics
+
+# ===============================
+# DEVICE
+# ===============================
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ===============================
+# LOAD TRAIN + TEST DATA
+# ===============================
 train_dataset = FloodDataset(
-    sar_dir="",
-    ndwi_dir="",
-    gen_ndwi_dir="",
-    mask_dir=""
+    sar_dir="/content/drive/MyDrive/Assam_nan-free/vh",
+    ndwi_dir="/content/drive/MyDrive/Assam_nan-free/ndwi",
+    gen_ndwi_dir="/content/drive/MyDrive/Assam_gen_ndwi_tif",
+    mask_dir="/content/drive/MyDrive/Assam_nan-free/gt",
+    dataset_type='train'
 )
 
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=False)
+test_dataset = FloodDataset(
+    sar_dir="/content/drive/MyDrive/Assam_TEST_nan-free/vh",
+    ndwi_dir="/content/drive/MyDrive/Assam_TEST_nan-free/ndwi",
+    gen_ndwi_dir="/content/drive/MyDrive/Assam_test_gen_ndwi_npy", # Corrected path
+    mask_dir="/content/drive/MyDrive/Assam_TEST_nan-free/gt",
+    dataset_type='test'
+)
 
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=4, shuffle=False)
 
-# ==========================================
-# EVALUATION
-# ==========================================
-TP = FP = TN = FN = 0
+# ===============================
+# LOAD TRAINED MODEL
+# ===============================
+model = SwinUNet(in_channels=3).to(device)
+model.load_state_dict(torch.load("swin_unet_flood_50x50.pth", map_location=device))
 
-with torch.no_grad():
-    for x, y in test_loader:
-        x, y = x.to(DEVICE), y.to(DEVICE)
+# ===============================
+# EVALUATE TRAIN SET
+# ===============================
+train_metrics = evaluate_model(model, train_loader, device)
 
-        preds = model(x)
-        preds = (preds > 0.5).float()
+print("\n📊 TRAIN SET METRICS")
+for k, v in train_metrics.items():
+    print(f"{k}: {v:.4f}")
 
-        TP += ((preds == 1) & (y == 1)).sum().item()
-        TN += ((preds == 0) & (y == 0)).sum().item()
-        FP += ((preds == 1) & (y == 0)).sum().item()
-        FN += ((preds == 0) & (y == 1)).sum().item()
+# ===============================
+# EVALUATE TEST SET
+# ===============================
+test_metrics = evaluate_model(model, test_loader, device)
 
-total = TP + TN + FP + FN
-
-accuracy = (TP + TN) / (total + 1e-6)
-precision = TP / (TP + FP + 1e-6)
-recall = TP / (TP + FN + 1e-6)
-f1 = 2 * precision * recall / (precision + recall + 1e-6)
-iou = TP / (TP + FP + FN + 1e-6)
-dice = 2 * TP / (2 * TP + FP + FN + 1e-6)
-
-po = (TP + TN) / (total + 1e-6)
-pe = (((TP + FP)*(TP + FN)) + ((FN + TN)*(FP + TN))) / ((total**2) + 1e-6)
-kappa = (po - pe) / (1 - pe + 1e-6)
-
-print("\n===== Train RESULTS =====")
-print(f"Accuracy      : {accuracy:.4f}")
-print(f"Precision     : {precision:.4f}")
-print(f"Recall        : {recall:.4f}")
-print(f"F1 Score      : {f1:.4f}")
-print(f"IoU           : {iou:.4f}")
-print(f"Dice          : {dice:.4f}")
-print(f"Cohen Kappa   : {kappa:.4f}")
+print("\n📊 TEST SET METRICS")
+for k, v in test_metrics.items():
+    print(f"{k}: {v:.4f}")
