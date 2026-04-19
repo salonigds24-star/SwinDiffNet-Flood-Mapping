@@ -71,7 +71,7 @@ tiple regions, namely Punjab, Bihar, West Bengal, Assam, and Uttar Pradesh. The
 proposed SwinDiffNet framework is evaluated against baseline models including 1D-
 CNN, 2D-CNN, Conditional-GAN, and Swin-UNet. Across all regions, SwinDiffNet
 demonstrates consistently strong performance, achieving accuracy values of 0.8481
-(Punjab), 0.8499 (Bihar), 0.8593 (West Bengal), 0.8843 (Assam), and 0.8199 (Uttar
+(Punjab), 0.8499 (Bihar), 0.8593 (West Bengal), 0.9390 (Assam), and 0.8199 (Uttar
 Pradesh). The corresponding improvements observed in F1-score and Intersection over
 Union (IoU) indicate that incorporating diffusion-based NDWI features contributes to
 more reliable flood boundary detection under varying geographical conditions.
@@ -118,5 +118,8 @@ Loss function BCE + Dice Loss
 
 
 5. Dataset Access / Instructions
-  5.1 
+   Assam generated dataset is provided  , it has 3 folders 1. vh-sentinel-1 sar data
+                                                           2. ndwi-sentinel-2 optical data
+                                                           3. Ground truth
+   On google colab we can run the code provided in train.py nd test.py
 
