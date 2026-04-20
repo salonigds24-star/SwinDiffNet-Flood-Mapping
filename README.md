@@ -21,7 +21,7 @@ provides a robust and reliable solution for flood mapping in scenarios where opt
 cal imagery is unavailable, enhancing flood extent estimation under challenging
 environmental conditions.
 
-1. Data Generation
+**1. Data Generation**
 
 A multi-source dataset was constructed using real flood events from five flood-prone states of India: Punjab, Assam, Uttar Pradesh, Bihar, and West Bengal.
 
@@ -38,7 +38,7 @@ Cross-verification with multiple external sources (e.g., satellite imagery platf
 This process ensures a reliable and representative dataset for flood segmentation tasks
 
 
-2. Proposed Approach
+**2. Proposed Approach**
 
 To address the issue of missing or unreliable NDWI information due to cloud cover, a Conditional Diffusion Model (CDM) is employed.
 
@@ -51,7 +51,8 @@ This fused multi-modal representation is then passed to a Swin-UNet architecture
 
 This approach enhances model robustness by effectively combining real and generated data, improving performance in challenging environmental conditions.
 
-3.Results
+**3.Results**
+
 The performance of the proposed SwinDiffNet framework is first evaluated on the
 curated multi-state dataset. To assess the effectiveness of the Conditional Diffu-
 sion Model (CDM) for SAR-to-optical translation, the recovered NDWI images are
@@ -89,10 +90,10 @@ the proposed model. The limited inter-country performance variation highlights t
 model’s ability to learn domain-invariant flood representations, thereby improving its
 applicability for large-scale and real-world flood monitoring scenarios.
 
-4. Implementations detail
-4.A Hyperparameter configuration employed for
+**4. Implementations detail**
+**4.A Hyperparameter configuration employed for
 training the Conditional Diffusion Model (CDM) in the
-proposed framework.
+proposed framework.**
 Parameter Value
 Patch size 50 × 50
 Batch size 8
@@ -105,9 +106,9 @@ Optimizer Adam
 Learning rate 1 × 10−4
 Loss function Mean Squared Error (MSE)
 
-4.B Hyperparameter settings used for training the
+**4.B Hyperparameter settings used for training the
 Swin-UNet-based flood segmentation model.
-Parameter Value
+Parameter Value**
 Input patch size 50 × 50
 Input channels 3 (SAR, NDWI, reconstructed NDWI)
 Batch size 4
@@ -117,7 +118,7 @@ Learning rate 1 × 10−4
 Loss function BCE + Dice Loss
 
 
-5. Dataset Access / Instructions
+**5. Dataset Access / Instructions**
    Assam generated dataset is provided  , it has 3 folders 1. vh-sentinel-1 sar data
                                                            2. ndwi-sentinel-2 optical data
                                                            3. Ground truth
